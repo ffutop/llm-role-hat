@@ -13,6 +13,7 @@ Commands:
   hat role create <role>                         Create a new role.
   hat role add-skill <role> <source-dir> <skill>
                                                  Copy a skill into a role.
+  hat role share-auth <role> [codex|claude]      Link a role to default file credentials.
   hat role list                                  List roles.
   hat role doctor [role]                         Read-only health check.
   hat run <role> -- <cli> [args...]              Run a registered CLI for a role.
@@ -47,7 +48,7 @@ with_role_lock() {
   local role="$1" lock="$(role_dir "$role")/.hat-lock"
   shift
   mkdir "$lock" 2>/dev/null || die "role '$role' is being changed by another hat process"
-  "$@" || {
+  ( "$@" ) || {
     rmdir "$lock"
     return 1
   }
@@ -103,6 +104,70 @@ cmd_role_add_skill() {
   [ -d "$source" ] || die "skill source is not a directory: $source"
   [ -f "$source/SKILL.md" ] || die "skill source must contain SKILL.md: $source"
   with_role_lock "$role" _role_add_skill "$role" "$source" "$skill"
+}
+
+auth_source_file() {
+  case "$1" in
+    codex) printf '%s/.codex/auth.json\n' "$HOME" ;;
+    claude) printf '%s/.claude/.credentials.json\n' "$HOME" ;;
+    *) die "unsupported shared-auth adapter: $1" ;;
+  esac
+}
+
+auth_target_name() {
+  case "$1" in
+    codex) printf 'auth.json\n' ;;
+    claude) printf '.credentials.json\n' ;;
+    *) die "unsupported shared-auth adapter: $1" ;;
+  esac
+}
+
+ensure_auth_source_file() {
+  local source="$1" parent
+  parent="$(dirname "$source")"
+  if [ ! -e "$source" ] && [ ! -L "$source" ]; then
+    mkdir -p "$parent"
+    (umask 077; touch "$source")
+    note "created empty shared credential source: $source"
+  fi
+  [ -f "$source" ] || die "shared credential source is not a file: $source"
+  chmod 600 "$source"
+}
+
+_role_share_auth_adapter() {
+  local role="$1" adapter="$2" source target actual
+  source="$(auth_source_file "$adapter")"
+  target="$(role_dir "$role")/adapters/$adapter/$(auth_target_name "$adapter")"
+  ensure_auth_source_file "$source"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if [ -L "$target" ]; then
+      actual="$(readlink "$target")"
+      [ "$actual" = "$source" ] && { note "$role: $adapter already shares $source"; return 0; }
+    fi
+    die "$role: shared credential target already exists: $target"
+  fi
+  ln -s "$source" "$target"
+  note "$role: linked $adapter credentials to $source"
+}
+
+_role_share_auth() {
+  local role="$1" adapter="$2"
+  case "$adapter" in
+    all)
+      _role_share_auth_adapter "$role" codex
+      _role_share_auth_adapter "$role" claude
+      ;;
+    codex|claude) _role_share_auth_adapter "$role" "$adapter" ;;
+    *) die "unsupported shared-auth adapter: $adapter (use codex or claude)" ;;
+  esac
+}
+
+cmd_role_share_auth() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die 'usage: hat role share-auth <role> [codex|claude]'
+  local role="$1" adapter="${2:-all}"
+  valid_role "$role" || die "invalid role '$role'"
+  role_exists "$role" || die "unknown hat role: $role"
+  with_role_lock "$role" _role_share_auth "$role" "$adapter"
 }
 
 cmd_role_list() {
@@ -237,8 +302,8 @@ _hat_completion() {
   local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}"
   if [ "$prev" = "hat" ]; then COMPREPLY=( $(compgen -W 'role run shortcut completion' -- "$cur") ); return; fi
   if [ "${COMP_WORDS[1]}" = role ]; then
-    if [ "$prev" = role ]; then COMPREPLY=( $(compgen -W 'create add-skill list doctor' -- "$cur") ); return; fi
-    case "${COMP_WORDS[2]}" in add-skill|doctor) COMPREPLY=( $(compgen -W "$(hat role list)" -- "$cur") ) ;; esac
+    if [ "$prev" = role ]; then COMPREPLY=( $(compgen -W 'create add-skill share-auth list doctor' -- "$cur") ); return; fi
+    case "${COMP_WORDS[2]}" in add-skill|share-auth|doctor) COMPREPLY=( $(compgen -W "$(hat role list)" -- "$cur") ) ;; esac
   fi
 }
 complete -F _hat_completion hat
@@ -272,7 +337,8 @@ case "$1" in
       add-skill) shift; cmd_role_add_skill "$@" ;;
       list) shift; cmd_role_list "$@" ;;
       doctor) shift; cmd_role_doctor "$@" ;;
-      *) die 'usage: hat role <create|add-skill|list|doctor> ...' ;;
+      share-auth) shift; cmd_role_share_auth "$@" ;;
+      *) die 'usage: hat role <create|add-skill|share-auth|list|doctor> ...' ;;
     esac ;;
   run) shift; cmd_run "$@" ;;
   shortcut)

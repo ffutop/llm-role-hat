@@ -22,11 +22,11 @@ codex @architect
 
 - 角色是稳定的工作身份，不是模型、推理模式或任务类型。
 - 技能是一个包含 `SKILL.md` 及其所需脚本、参考资料或模板的目录。
-- `hat` 只共享文件系统资产；它不会安装 CLI、执行技能脚本、管理插件/MCP 或管理凭据。
+- `hat` 只共享文件系统资产；它不会安装 CLI、执行技能脚本、管理插件/MCP 或浏览器登录。
 - 一个角色在每个受支持 CLI 中始终拥有同一组技能。添加技能会先进行预检，再复制到该角色中，并以原子方式完成。
 - `hat` 不会迁移、修复或扫描已有的 Claude/Codex/Qwen/Copilot 主目录；它只管理自己在 `HAT_HOME` 下创建的目录。
 
-MCP、插件和共享认证被有意延后处理。只有当未来的适配器能够证明它们可作为文件系统资产安全共享、且不突破上述边界时，才会考虑加入。
+MCP 与插件被有意延后。文件凭据共享是显式选择：`hat` 可以将 Codex 和 Claude 的文件凭据路径链接到其默认主目录，但绝不读取或打印其内容。
 
 ## 安装
 
@@ -55,6 +55,9 @@ hat role create architect
 
 # 将标准技能包复制到角色中；源目录会保留。
 hat role add-skill architect ~/work/skills/tdd tdd
+
+# 显式将角色凭据文件链接到默认 CLI 主目录。
+hat role share-auth architect
 
 # 在当前项目目录中运行已注册的 CLI。
 hat run architect -- claude
@@ -102,6 +105,19 @@ hat role doctor architect
 Qwen Code 将 `QWEN_HOME` 说明为可配置的全局主目录，其中包括全局技能。GitHub Copilot CLI 说明了 `COPILOT_HOME` 以及个人 `skills/<name>/SKILL.md` 位置。在依赖某个新 CLI 版本之前，请先查看该适配器最新的兼容性说明。[Qwen Code 配置](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/) · [Copilot CLI 技能](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills)
 
 `hat role doctor` 会验证角色标记、每个适配器的发现链接以及每个本地复制的技能包。若已安装适配器，它还会在本地执行一次 `--version` 查询；缺少适配器只会产生警告，因为可以在所有 CLI 安装完成前预先准备角色。它不会启动交互式会话、进行认证或连接网络服务。
+
+## 共享文件凭据
+
+`hat role share-auth <role> [codex|claude]` 会显式创建如下绝对软链。不传适配器参数时会同时创建两种链接。
+
+| CLI | 角色文件 | 共享源 |
+| --- | --- | --- |
+| Codex | `<role>/adapters/codex/auth.json` | `~/.codex/auth.json` |
+| Claude Code | `<role>/adapters/claude/.credentials.json` | `~/.claude/.credentials.json` |
+
+若源文件不存在，`hat` 会先创建权限为 `0600` 的空文件，再将角色文件链接过去；已有源文件也会被收紧为 `0600`。这只是在准备共享位置，并不代表已登录；文件式 CLI 登录可经由该链接写入源文件，但 macOS 上 Claude 的正常登录仍写入 Keychain。已有的角色目标永不覆盖，`hat` 也不会读取或显示凭据内容。
+
+Codex 当前会原地更新文件凭据，因此软链可形成一份共享的 `auth.json`。Claude Code 可能在 token 刷新时以替换目录项的方式更新 `.credentials.json`，从而使角色软链断开；refresh token 轮换也可能令其他文件共享者失效。因此 Claude 软链仅是尽力而为，不能用于并发会话，也不能替代 macOS Keychain 凭据。macOS 上 Claude 通常使用 Keychain，而非该文件。
 
 ## 开发
 

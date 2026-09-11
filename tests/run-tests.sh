@@ -57,14 +57,36 @@ if "$HAT" run architect -- unknown-cli >"$TMP_DIR/unknown.out" 2>&1; then
   fail 'unknown adapters must fail'
 fi
 
-echo '5. doctor is read-only and detects an invalid local skill'
+echo '5. role auth links share existing files and create missing source files'
+AUTH_HOME="$TMP_DIR/auth-home"
+mkdir -p "$AUTH_HOME/.codex"
+printf '%s\n' '{"token":"fixture"}' > "$AUTH_HOME/.codex/auth.json"
+HOME="$AUTH_HOME" "$HAT" role share-auth architect codex
+assert_link_to "$HAT_HOME/architect/adapters/codex/auth.json"
+[ "$(readlink "$HAT_HOME/architect/adapters/codex/auth.json")" = "$AUTH_HOME/.codex/auth.json" ] || fail 'Codex auth link must target the default auth file'
+HOME="$AUTH_HOME" "$HAT" role share-auth architect claude
+assert_file "$AUTH_HOME/.claude/.credentials.json"
+[ "$(stat -f '%Lp' "$AUTH_HOME/.claude/.credentials.json")" = 600 ] || fail 'created credential source must be mode 600'
+assert_link_to "$HAT_HOME/architect/adapters/claude/.credentials.json"
+[ "$(readlink "$HAT_HOME/architect/adapters/claude/.credentials.json")" = "$AUTH_HOME/.claude/.credentials.json" ] || fail 'Claude credential link must target the default credential file'
+if HOME="$AUTH_HOME" "$HAT" role share-auth architect qwen >"$TMP_DIR/auth-adapter.out" 2>&1; then
+  fail 'unsupported auth adapter must fail'
+fi
+"$HAT" role create reviewer
+printf '%s\n' 'keep-me' > "$HAT_HOME/reviewer/adapters/codex/auth.json"
+if HOME="$AUTH_HOME" "$HAT" role share-auth reviewer codex >"$TMP_DIR/auth-conflict.out" 2>&1; then
+  fail 'existing auth target must not be replaced'
+fi
+assert_contains "$(<"$HAT_HOME/reviewer/adapters/codex/auth.json")" 'keep-me'
+
+echo '6. doctor is read-only and detects an invalid local skill'
 rm "$HAT_HOME/architect/skills/tdd/SKILL.md"
 if "$HAT" role doctor architect >"$TMP_DIR/doctor.out" 2>&1; then
   fail 'doctor must fail on an invalid local skill'
 fi
 assert_contains "$(<"$TMP_DIR/doctor.out")" 'invalid local skill'
 
-echo '6. shell shortcut installation is append-only and idempotent'
+echo '7. shell shortcut installation is append-only and idempotent'
 RC_FILE="$TMP_DIR/bashrc"
 printf '%s\n' '# existing user setting' > "$RC_FILE"
 "$HAT" shortcut install bash "$RC_FILE"
@@ -84,7 +106,7 @@ if "$HAT" shortcut install bash "$TMP_DIR/incomplete-rc" >"$TMP_DIR/incomplete.o
   fail 'incomplete shortcut block must fail'
 fi
 
-echo '7. the installer ships the current command'
+echo '8. the installer ships the current command'
 INSTALL_PREFIX="$TMP_DIR/install-prefix"
 PREFIX="$INSTALL_PREFIX" "$ROOT_DIR/install.sh" >"$TMP_DIR/install.out"
 assert_file "$INSTALL_PREFIX/bin/hat"

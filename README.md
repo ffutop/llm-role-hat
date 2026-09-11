@@ -22,11 +22,11 @@ codex @architect
 
 - A role is a stable work identity, not a model, reasoning mode, or task type.
 - A skill is a directory containing `SKILL.md` and any scripts, references, or templates it needs.
-- `hat` only shares filesystem assets. It does not install CLIs, execute skill scripts, manage plugins/MCP, or manage credentials.
+- `hat` only shares filesystem assets. It does not install CLIs, execute skill scripts, manage plugins/MCP, or perform browser-based authentication.
 - A role always has the same skill set across every supported CLI. Adding a skill copies it into that role after preflight, and completes atomically.
 - `hat` never migrates, repairs, or scans existing Claude/Codex/Qwen/Copilot homes. It only manages directories that it creates under `HAT_HOME`.
 
-MCP, plugins, and shared authentication are deliberately deferred. They may be added only if a future adapter can prove that they are safely shareable as filesystem assets without changing this boundary.
+MCP and plugins are deliberately deferred. Shared file credentials are an explicit opt-in: `hat` can link the Codex and Claude file credential paths to their default homes, but it never reads or prints their contents.
 
 ## Install
 
@@ -55,6 +55,9 @@ hat role create architect
 
 # Copy a standard skill package into the role. Source is retained.
 hat role add-skill architect ~/work/skills/tdd tdd
+
+# Explicitly link role credential files to the default CLI homes.
+hat role share-auth architect
 
 # Run a registered CLI in the current project directory.
 hat run architect -- claude
@@ -102,6 +105,19 @@ Skill names use lower-case slugs (`tdd`, `report-review`). `hat` does not offer 
 Qwen Code documents `QWEN_HOME` as its configurable global home, including global skills. GitHub Copilot CLI documents `COPILOT_HOME` and personal `skills/<name>/SKILL.md` locations. Check the adapter’s current compatibility note before relying on a new CLI release. [Qwen Code configuration](https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/) · [Copilot CLI skills](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills)
 
 `hat role doctor` verifies the role marker, every adapter discovery link, and every locally copied skill package. It also performs a local `--version` query when an adapter is installed; a missing adapter is a warning because roles can be prepared before every CLI is installed. It never starts an interactive session, authenticates, or contacts a network service.
+
+## Shared file credentials
+
+`hat role share-auth <role> [codex|claude]` explicitly creates the following absolute symlinks. With no adapter argument it creates both.
+
+| CLI | Role file | Shared source |
+| --- | --- | --- |
+| Codex | `<role>/adapters/codex/auth.json` | `~/.codex/auth.json` |
+| Claude Code | `<role>/adapters/claude/.credentials.json` | `~/.claude/.credentials.json` |
+
+If a source file is absent, `hat` creates an empty, mode-`0600` file and then links the role file to it; existing source files are also restricted to mode `0600`. This only prepares the shared location; it does not log in. A later file-backed CLI login may populate the source through the link, but a normal macOS Claude login writes Keychain instead. Existing role targets are never replaced, and `hat` never reads or displays credential contents.
+
+Codex currently updates its file credential in place, so the symlink provides one shared `auth.json`. Claude Code may update `.credentials.json` by replacing its directory entry during token refresh; that can detach the role symlink and refresh-token rotation can invalidate other file sharers. The Claude link is therefore best-effort and must not be used for concurrent sessions or as a substitute for macOS Keychain credentials. On macOS, Claude normally uses Keychain rather than this file.
 
 ## Development
 
