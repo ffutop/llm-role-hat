@@ -1,10 +1,15 @@
 # hat
 
-![hat banner](assets/hat-banner.png)
+[![OpenAI Codex](https://img.shields.io/badge/OpenAI_Codex-supported-412991?logo=openai&logoColor=white)](#adapters)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-supported-D97757?logo=anthropic&logoColor=white)](#adapters)
+
+> **Role-scoped local profiles and skills for LLM tools.**
 
 `hat` is a small, local, open-source tool for people who work through several stable roles—such as `engineer`, `economist`, `analyst`, and `technical writer`—while switching among LLM CLIs.
 
 It keeps each role's skill packages inside that role's directory, then links the role-selected set into the configuration homes of Claude Code, Codex, Qwen Code, and GitHub Copilot CLI. `hat` does not choose a role for you: you name it each time you run a CLI.
+
+![hat banner](assets/hat-banner.png)
 
 ```sh
 hat run architect -- codex

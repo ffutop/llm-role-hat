@@ -1,10 +1,15 @@
 # hat
 
-![hat banner](assets/hat-banner.png)
+[![OpenAI Codex](https://img.shields.io/badge/OpenAI_Codex-supported-412991?logo=openai&logoColor=white)](#适配器)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-supported-D97757?logo=anthropic&logoColor=white)](#适配器)
+
+> **面向大语言模型工具的、按角色隔离的本地配置与技能。**
 
 `hat` 是一个小巧、本地、开源的工具，面向会在多个稳定角色（如工程师、经济师、分析师和技术写作者）之间工作、同时切换不同 LLM CLI 的用户。
 
 它将每个角色的技能包保存在该角色自己的目录中，再把该角色选定的技能集链接到 Claude Code、Codex、Qwen Code 和 GitHub Copilot CLI 的配置目录。`hat` 不会替你选择角色：每次运行 CLI 时，都由你明确指定。
+
+![hat banner](assets/hat-banner.png)
 
 ```sh
 hat run architect -- codex
