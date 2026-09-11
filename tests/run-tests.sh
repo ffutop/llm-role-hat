@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HAT="$ROOT_DIR/bin/hat"
+TMP_DIR="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/hat-tests.XXXXXX")" && pwd)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+export HAT_HOME="$TMP_DIR/home"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+assert_file() { [ -f "$1" ] || fail "expected file: $1"; }
+assert_dir() { [ -d "$1" ] || fail "expected directory: $1"; }
+assert_link_to() { [ -L "$1" ] || fail "expected symlink: $1"; [ -e "$1" ] || fail "broken symlink: $1"; }
+assert_contains() { [[ "$1" == *"$2"* ]] || fail "expected '$2' in: $1"; }
+
+echo '1. roles are created once and never repaired implicitly'
+"$HAT" role create architect
+assert_dir "$HAT_HOME/architect/skills"
+for adapter in claude codex qwen copilot; do
+  assert_link_to "$HAT_HOME/architect/adapters/$adapter/skills"
+done
+if "$HAT" role create architect >"$TMP_DIR/duplicate.out" 2>&1; then
+  fail 'duplicate role creation must fail'
+fi
+
+echo '2. copying a standard skill into a role is atomic'
+mkdir -p "$TMP_DIR/source/tdd"
+printf '%s\n' '---' 'name: tdd' 'description: Test-first work.' '---' > "$TMP_DIR/source/tdd/SKILL.md"
+"$HAT" role add-skill architect "$TMP_DIR/source/tdd" tdd
+assert_file "$HAT_HOME/architect/skills/tdd/SKILL.md"
+assert_file "$HAT_HOME/architect/skills/tdd/.hat-skill"
+if "$HAT" role add-skill architect "$TMP_DIR/source/tdd" tdd >"$TMP_DIR/duplicate-skill.out" 2>&1; then
+  fail 'duplicate role skill copy must fail'
+fi
+if "$HAT" role add-skill architect "$TMP_DIR/source/tdd" architecture/tdd >"$TMP_DIR/nested-skill.out" 2>&1; then
+  fail 'nested skill names must fail'
+fi
+
+echo '3. a damaged adapter rejects a skill without copying it into the role'
+"$HAT" role create finance
+mkdir -p "$TMP_DIR/source/review"
+printf '%s\n' '---' 'name: review' 'description: Review work.' '---' > "$TMP_DIR/source/review/SKILL.md"
+rm "$HAT_HOME/finance/adapters/copilot/skills"
+if "$HAT" role add-skill finance "$TMP_DIR/source/review" review >"$TMP_DIR/atomic.out" 2>&1; then
+  fail 'adding a skill with a damaged adapter must fail'
+fi
+[ ! -e "$HAT_HOME/finance/skills/review" ] || fail 'failed add must not leave a partial role copy'
+
+echo '4. run only accepts registered adapters and preserves the current directory'
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/work"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\\n" "$PWD|$CODEX_HOME"' > "$TMP_DIR/bin/codex"
+chmod +x "$TMP_DIR/bin/codex"
+RUN_OUT="$(cd "$TMP_DIR/work" && PATH="$TMP_DIR/bin:$PATH" "$HAT" run architect -- codex)"
+assert_contains "$RUN_OUT" "$TMP_DIR/work|$HAT_HOME/architect/adapters/codex"
+if "$HAT" run architect -- unknown-cli >"$TMP_DIR/unknown.out" 2>&1; then
+  fail 'unknown adapters must fail'
+fi
+
+echo '5. doctor is read-only and detects an invalid local skill'
+rm "$HAT_HOME/architect/skills/tdd/SKILL.md"
+if "$HAT" role doctor architect >"$TMP_DIR/doctor.out" 2>&1; then
+  fail 'doctor must fail on an invalid local skill'
+fi
+assert_contains "$(<"$TMP_DIR/doctor.out")" 'invalid local skill'
+
+echo '6. shell shortcut installation is append-only and idempotent'
+RC_FILE="$TMP_DIR/bashrc"
+printf '%s\n' '# existing user setting' > "$RC_FILE"
+"$HAT" shortcut install bash "$RC_FILE"
+assert_contains "$(<"$RC_FILE")" '# existing user setting'
+assert_contains "$(<"$RC_FILE")" '# >>> hat role shortcuts >>>'
+assert_contains "$(<"$RC_FILE")" 'hat run "$role" -- codex "$@"'
+mkdir -p "$TMP_DIR/shortcut-bin"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*"' > "$TMP_DIR/shortcut-bin/hat"
+chmod +x "$TMP_DIR/shortcut-bin/hat"
+WRAPPER_OUT="$(PATH="$TMP_DIR/shortcut-bin:$PATH" bash -c 'source "$1"; codex @architect --resume' -- "$RC_FILE")"
+assert_contains "$WRAPPER_OUT" 'run architect -- codex --resume'
+SHORTCUT_BLOCKS="$(grep -c '^# >>> hat role shortcuts >>>$' "$RC_FILE")"
+"$HAT" shortcut install bash "$RC_FILE"
+[ "$(grep -c '^# >>> hat role shortcuts >>>$' "$RC_FILE")" = "$SHORTCUT_BLOCKS" ] || fail 'shortcut installation must not duplicate its block'
+printf '%s\n' '# >>> hat role shortcuts >>>' > "$TMP_DIR/incomplete-rc"
+if "$HAT" shortcut install bash "$TMP_DIR/incomplete-rc" >"$TMP_DIR/incomplete.out" 2>&1; then
+  fail 'incomplete shortcut block must fail'
+fi
+
+echo '7. the installer ships the current command'
+INSTALL_PREFIX="$TMP_DIR/install-prefix"
+PREFIX="$INSTALL_PREFIX" "$ROOT_DIR/install.sh" >"$TMP_DIR/install.out"
+assert_file "$INSTALL_PREFIX/bin/hat"
+assert_contains "$("$INSTALL_PREFIX/bin/hat" help)" 'hat shortcut install <bash|zsh> [rc-file]'
+
+echo 'All hat tests passed.'

@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# hat — role-scoped local skills for local LLM CLIs.
+set -euo pipefail
+
+HAT_HOME="${HAT_HOME:-$HOME/.hat}"
+ADAPTERS=(claude codex qwen copilot)
+
+usage() {
+  cat <<'EOF'
+Usage: hat <command> [arguments]
+
+Commands:
+  hat role create <role>                         Create a new role.
+  hat role add-skill <role> <source-dir> <skill>
+                                                 Copy a skill into a role.
+  hat role list                                  List roles.
+  hat role doctor [role]                         Read-only health check.
+  hat run <role> -- <cli> [args...]              Run a registered CLI for a role.
+  hat shortcut install <bash|zsh> [rc-file]       Install @role CLI shortcuts.
+  hat completion <bash|zsh>                      Print shell completion.
+
+Registered CLIs: claude, codex, qwen, copilot
+Environment: HAT_HOME (default: ~/.hat)
+EOF
+}
+
+die() { printf 'hat: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*"; }
+
+valid_segment() { [[ "$1" =~ ^[a-z][a-z0-9-]*$ ]]; }
+
+valid_role() { valid_segment "$1"; }
+
+valid_skill_name() { valid_segment "$1"; }
+
+role_dir() { printf '%s/%s\n' "$HAT_HOME" "$1"; }
+
+role_exists() { [ -f "$(role_dir "$1")/.hat-role" ]; }
+
+is_adapter() {
+  local adapter="$1" item
+  for item in "${ADAPTERS[@]}"; do [ "$item" = "$adapter" ] && return 0; done
+  return 1
+}
+
+with_role_lock() {
+  local role="$1" lock="$(role_dir "$role")/.hat-lock"
+  shift
+  mkdir "$lock" 2>/dev/null || die "role '$role' is being changed by another hat process"
+  "$@" || {
+    rmdir "$lock"
+    return 1
+  }
+  rmdir "$lock"
+}
+
+cmd_role_create() {
+  [ "$#" -eq 1 ] || die 'usage: hat role create <role>'
+  local role="$1" dest tmp adapter
+  valid_role "$role" || die "invalid role '$role' (use lowercase letters, digits, and hyphens)"
+  dest="$(role_dir "$role")"
+  [ ! -e "$dest" ] && [ ! -L "$dest" ] || die "role '$role' already exists; hat never repairs existing roles"
+  mkdir -p "$HAT_HOME"
+  tmp="$HAT_HOME/.${role}.tmp.$$"
+  trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/skills" "$tmp/adapters"
+  : > "$tmp/.hat-role"
+  for adapter in "${ADAPTERS[@]}"; do
+    mkdir -p "$tmp/adapters/$adapter"
+    ln -s ../../skills "$tmp/adapters/$adapter/skills"
+  done
+  mv "$tmp" "$dest"
+  trap - EXIT
+  note "created role '$role'"
+}
+
+_role_add_skill() {
+  local role="$1" source="$2" skill="$3" base target temporary adapter
+  base="$(role_dir "$role")"
+  target="$base/skills/$skill"
+  for adapter in "${ADAPTERS[@]}"; do
+    [ -L "$base/adapters/$adapter/skills" ] && [ "$base/adapters/$adapter/skills" -ef "$base/skills" ] || die "role '$role' has an invalid $adapter discovery layer; run doctor and repair it manually"
+  done
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    die "role skill already exists: $skill"
+  fi
+  temporary="$base/skills/.${skill}.hat-tmp.$$"
+  cp -R "$source" "$temporary"
+  : > "$temporary/.hat-skill"
+  if ! mv "$temporary" "$target"; then
+    rm -rf "$temporary"
+    die "could not copy '$skill' into role '$role'"
+  fi
+  note "copied '$skill' into role '$role'"
+}
+
+cmd_role_add_skill() {
+  [ "$#" -eq 3 ] || die 'usage: hat role add-skill <role> <source-dir> <skill>'
+  local role="$1" source="$2" skill="$3"
+  valid_role "$role" || die "invalid role '$role'"
+  valid_skill_name "$skill" || die "invalid skill name '$skill' (use lowercase letters, digits, and hyphens)"
+  role_exists "$role" || die "unknown hat role: $role"
+  [ -d "$source" ] || die "skill source is not a directory: $source"
+  [ -f "$source/SKILL.md" ] || die "skill source must contain SKILL.md: $source"
+  with_role_lock "$role" _role_add_skill "$role" "$source" "$skill"
+}
+
+cmd_role_list() {
+  [ "$#" -eq 0 ] || die 'usage: hat role list'
+  [ -d "$HAT_HOME" ] || return 0
+  local path role
+  for path in "$HAT_HOME"/*; do
+    [ -d "$path" ] || continue
+    role="$(basename "$path")"
+    [ -f "$path/.hat-role" ] && printf '%s\n' "$role"
+  done
+}
+
+adapter_env() {
+  local role="$1" adapter="$2" base
+  base="$(role_dir "$role")/adapters/$adapter"
+  case "$adapter" in
+    claude) CLAUDE_CONFIG_DIR="$base" ;;
+    codex) CODEX_HOME="$base" ;;
+    qwen) QWEN_HOME="$base" ;;
+    copilot) COPILOT_HOME="$base" ;;
+  esac
+}
+
+cmd_run() {
+  [ "$#" -ge 3 ] || die 'usage: hat run <role> -- <cli> [args...]'
+  local role="$1"
+  shift
+  [ "$1" = '--' ] || die 'usage: hat run <role> -- <cli> [args...]'
+  shift
+  local adapter="$1"
+  valid_role "$role" || die "invalid role '$role'"
+  role_exists "$role" || die "unknown hat role: $role"
+  is_adapter "$adapter" || die "unregistered CLI '$adapter'; use one of: ${ADAPTERS[*]}"
+  command -v "$adapter" >/dev/null 2>&1 || die "registered CLI '$adapter' is not installed or not on PATH"
+  adapter_env "$role" "$adapter"
+  case "$adapter" in
+    claude) export CLAUDE_CONFIG_DIR ;;
+    codex) export CODEX_HOME ;;
+    qwen) export QWEN_HOME ;;
+    copilot) export COPILOT_HOME ;;
+  esac
+  exec "$@"
+}
+
+doctor_role() {
+  local role="$1" base="$(role_dir "$1")" issue=0 adapter skill version
+  if ! role_exists "$role"; then note "$role: not a hat role"; return 1; fi
+  for adapter in "${ADAPTERS[@]}"; do
+    if [ ! -L "$base/adapters/$adapter/skills" ] || [ ! -e "$base/adapters/$adapter/skills" ] || ! [ "$base/adapters/$adapter/skills" -ef "$base/skills" ]; then
+      note "$role: broken adapter discovery link: $adapter/skills"; issue=1
+    fi
+    if command -v "$adapter" >/dev/null 2>&1; then
+      version="$("$adapter" --version 2>&1 | head -n 1 || true)"
+      note "$role: $adapter version ${version:-unavailable}"
+    else
+      note "$role: $adapter is not installed (warning)"
+    fi
+  done
+  while IFS= read -r marker; do
+    skill="$(dirname "$marker")"
+    if [ ! -f "$skill/SKILL.md" ]; then
+      note "$role: invalid local skill: ${skill#"$base/skills/"}"
+      issue=1
+    fi
+  done < <(find "$base/skills" -type f -name .hat-skill -print)
+  if [ "$issue" -eq 0 ]; then note "$role: healthy"; return 0; fi
+  return 1
+}
+
+cmd_role_doctor() {
+  [ "$#" -le 1 ] || die 'usage: hat role doctor [role]'
+  local role failed=0
+  if [ "$#" -eq 1 ]; then doctor_role "$1" || failed=1
+  else
+    while IFS= read -r role; do doctor_role "$role" || failed=1; done < <(cmd_role_list)
+  fi
+  return "$failed"
+}
+
+cmd_shortcut_install() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die 'usage: hat shortcut install <bash|zsh> [rc-file]'
+  local shell="$1" rc_file begin='# >>> hat role shortcuts >>>' end='# <<< hat role shortcuts <<<'
+  case "$shell" in
+    bash) rc_file="${2:-$HOME/.bashrc}" ;;
+    zsh) rc_file="${2:-$HOME/.zshrc}" ;;
+    *) die 'shell must be bash or zsh' ;;
+  esac
+  [ -n "$rc_file" ] || die 'rc-file must not be empty'
+  mkdir -p "$(dirname "$rc_file")"
+  touch "$rc_file"
+  if grep -Fqx "$begin" "$rc_file" || grep -Fqx "$end" "$rc_file"; then
+    grep -Fqx "$begin" "$rc_file" && grep -Fqx "$end" "$rc_file" && {
+      note "hat role shortcuts are already installed in $rc_file"
+      return 0
+    }
+    die "rc file contains an incomplete hat role shortcuts block: $rc_file"
+  fi
+  cat >> "$rc_file" <<'EOF'
+
+# >>> hat role shortcuts >>>
+claude() {
+  local role="${HAT_ROLE:-}"
+  [ "${1:-}" != "${1#@}" ] && { role="${1#@}"; shift; }
+  if [ -n "$role" ]; then
+    hat run "$role" -- claude "$@"
+  else
+    command claude "$@"
+  fi
+}
+
+codex() {
+  local role="${HAT_ROLE:-}"
+  [ "${1:-}" != "${1#@}" ] && { role="${1#@}"; shift; }
+  if [ -n "$role" ]; then
+    hat run "$role" -- codex "$@"
+  else
+    command codex "$@"
+  fi
+}
+# <<< hat role shortcuts <<<
+EOF
+  note "installed hat role shortcuts in $rc_file"
+}
+
+cmd_completion() {
+  [ "$#" -eq 1 ] || die 'usage: hat completion <bash|zsh>'
+  case "$1" in
+    bash)
+      cat <<'EOF'
+_hat_completion() {
+  local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}"
+  if [ "$prev" = "hat" ]; then COMPREPLY=( $(compgen -W 'role run shortcut completion' -- "$cur") ); return; fi
+  if [ "${COMP_WORDS[1]}" = role ]; then
+    if [ "$prev" = role ]; then COMPREPLY=( $(compgen -W 'create add-skill list doctor' -- "$cur") ); return; fi
+    case "${COMP_WORDS[2]}" in add-skill|doctor) COMPREPLY=( $(compgen -W "$(hat role list)" -- "$cur") ) ;; esac
+  fi
+}
+complete -F _hat_completion hat
+EOF
+      ;;
+    zsh)
+      cat <<'EOF'
+#compdef hat
+_hat() {
+  local -a roles
+  roles=( ${(f)"$(hat role list 2>/dev/null)"} )
+  _arguments '1: :->command' '*: :->args'
+  case $state in
+    command) _values 'command' 'role[manage roles]' 'run[run a CLI]' 'shortcut[install CLI shortcuts]' 'completion[print completion]' ;;
+    args) _arguments '1:role:->role' '2: :->subcommand' ;;
+  esac
+}
+_hat "$@"
+EOF
+      ;;
+    *) die 'completion shell must be bash or zsh' ;;
+  esac
+}
+
+[ "$#" -gt 0 ] || { usage; exit 1; }
+case "$1" in
+  role)
+    shift
+    case "${1:-}" in
+      create) shift; cmd_role_create "$@" ;;
+      add-skill) shift; cmd_role_add_skill "$@" ;;
+      list) shift; cmd_role_list "$@" ;;
+      doctor) shift; cmd_role_doctor "$@" ;;
+      *) die 'usage: hat role <create|add-skill|list|doctor> ...' ;;
+    esac ;;
+  run) shift; cmd_run "$@" ;;
+  shortcut)
+    shift
+    case "${1:-}" in
+      install) shift; cmd_shortcut_install "$@" ;;
+      *) die 'usage: hat shortcut install <bash|zsh> [rc-file]' ;;
+    esac ;;
+  completion) shift; cmd_completion "$@" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command '$1'" ;;
+esac
