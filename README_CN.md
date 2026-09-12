@@ -30,13 +30,19 @@ MCP 与插件被有意延后。文件凭据共享是显式选择：`hat` 可以�
 
 ## 安装
 
-克隆本仓库后，运行：
+使用 curl 安装：
 
 ```sh
-./install.sh
+curl -fsSL https://hat.ffutop.com/install.sh | bash
 ```
 
-安装程序默认将 `hat` 复制到 `~/.local/bin/hat`。设置 `PREFIX` 可选择其他当前用户可写的前缀。它不会修改 `.bashrc`、`.zshrc` 或其他 shell rc 文件。
+安装程序会从 `https://hat.ffutop.com/bin/hat` 下载 `hat`，默认安装到 `~/.local/bin/hat`。设置 `PREFIX` 可选择其他当前用户可写的前缀。它不会修改 `.bashrc`、`.zshrc` 或其他 shell rc 文件。系统需要具备 `curl` 或 `wget` 之一。
+
+如从本地检出版本安装，或需要使用固定版本/镜像，可通过 `HAT_DOWNLOAD_URL` 指向精确的 `bin/hat` 资源：
+
+```sh
+PREFIX="$HOME/.local" HAT_DOWNLOAD_URL="https://example.com/hat/bin/hat" ./install.sh
+```
 
 请确认所选 `bin` 目录已在 `PATH` 中，然后可选地启用自动补全：
 

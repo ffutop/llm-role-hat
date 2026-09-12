@@ -108,7 +108,7 @@ fi
 
 echo '8. the installer ships the current command'
 INSTALL_PREFIX="$TMP_DIR/install-prefix"
-PREFIX="$INSTALL_PREFIX" "$ROOT_DIR/install.sh" >"$TMP_DIR/install.out"
+PREFIX="$INSTALL_PREFIX" HAT_DOWNLOAD_URL="file://$ROOT_DIR/bin/hat" "$ROOT_DIR/install.sh" >"$TMP_DIR/install.out"
 assert_file "$INSTALL_PREFIX/bin/hat"
 assert_contains "$("$INSTALL_PREFIX/bin/hat" help)" 'hat shortcut install <bash|zsh> [rc-file]'
 

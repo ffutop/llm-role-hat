@@ -30,13 +30,19 @@ MCP and plugins are deliberately deferred. Shared file credentials are an explic
 
 ## Install
 
-Clone this repository, then run:
+Install with curl:
 
 ```sh
-./install.sh
+curl -fsSL https://hat.ffutop.com/install.sh | bash
 ```
 
-The installer copies `hat` to `~/.local/bin/hat` by default. Set `PREFIX` to choose another user-writable prefix. It never changes `.bashrc`, `.zshrc`, or another shell rc file.
+The installer downloads `hat` from `https://hat.ffutop.com/bin/hat` and installs it to `~/.local/bin/hat` by default. Set `PREFIX` to choose another user-writable prefix. It never changes `.bashrc`, `.zshrc`, or another shell rc file. It requires either `curl` or `wget`.
+
+For a local checkout or a pinned/mirrored release, point `HAT_DOWNLOAD_URL` to the exact `bin/hat` asset:
+
+```sh
+PREFIX="$HOME/.local" HAT_DOWNLOAD_URL="https://example.com/hat/bin/hat" ./install.sh
+```
 
 Ensure the chosen `bin` directory is on `PATH`, then optionally enable completion:
 
