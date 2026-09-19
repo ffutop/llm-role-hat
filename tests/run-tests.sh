@@ -199,4 +199,30 @@ PROXY_RUN_OUT_2="$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy
 AMBIENT_RUN_OUT="$(env -u http_proxy -u https_proxy HTTP_PROXY='http://ambient:1' HTTPS_PROXY='http://ambient:1' PATH="$TMP_DIR/proxy-bin:$PATH" "$HAT" run architect -- codex)"
 [ "$AMBIENT_RUN_OUT" = 'http://ambient:1|http://ambient:1|unset|unset' ] || fail "hat run must leave the ambient proxy untouched when no shared proxy is configured: $AMBIENT_RUN_OUT"
 
+echo '12. a single shared no-proxy list is set, injected into hat run for every role, and cleanly unset'
+[ "$("$HAT" no-proxy show)" = 'no no-proxy configured' ] || fail 'a fresh hat home must report no no-proxy configured'
+if "$HAT" no-proxy set 'bad host' >"$TMP_DIR/no-proxy-invalid.out" 2>&1; then
+  fail 'an invalid no-proxy value must be rejected'
+fi
+"$HAT" no-proxy set 'localhost,.internal'
+assert_file "$HAT_HOME/no_proxy"
+[ "$(<"$HAT_HOME/no_proxy")" = 'localhost,.internal' ] || fail 'no_proxy file must contain the configured value'
+[ "$("$HAT" no-proxy show)" = 'localhost,.internal' ] || fail 'no-proxy show must print the configured value'
+"$HAT" no-proxy set '*.example.com,10.0.0.1:8080,*'
+[ "$(<"$HAT_HOME/no_proxy")" = '*.example.com,10.0.0.1:8080,*' ] || fail 'no-proxy set must overwrite an existing no-proxy value'
+
+mkdir -p "$TMP_DIR/no-proxy-bin"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s|%s\n" "${NO_PROXY:-unset}" "${no_proxy:-unset}"' > "$TMP_DIR/no-proxy-bin/codex"
+chmod +x "$TMP_DIR/no-proxy-bin/codex"
+NO_PROXY_RUN_OUT="$(env -u NO_PROXY -u no_proxy PATH="$TMP_DIR/no-proxy-bin:$PATH" "$HAT" run architect -- codex)"
+[ "$NO_PROXY_RUN_OUT" = '*.example.com,10.0.0.1:8080,*|*.example.com,10.0.0.1:8080,*' ] || fail "hat run must export the shared no-proxy list in upper and lower case: $NO_PROXY_RUN_OUT"
+NO_PROXY_RUN_OUT_2="$(env -u NO_PROXY -u no_proxy PATH="$TMP_DIR/no-proxy-bin:$PATH" "$HAT" run finance -- codex)"
+[ "$NO_PROXY_RUN_OUT_2" = '*.example.com,10.0.0.1:8080,*|*.example.com,10.0.0.1:8080,*' ] || fail "the shared no-proxy list must apply the same way to every role: $NO_PROXY_RUN_OUT_2"
+
+"$HAT" no-proxy unset
+[ ! -e "$HAT_HOME/no_proxy" ] || fail 'no-proxy unset must remove the no_proxy file'
+[ "$("$HAT" no-proxy show)" = 'no no-proxy configured' ] || fail 'no-proxy show must report no no-proxy after unset'
+AMBIENT_NO_PROXY_RUN_OUT="$(env -u no_proxy NO_PROXY='ambient' PATH="$TMP_DIR/no-proxy-bin:$PATH" "$HAT" run architect -- codex)"
+[ "$AMBIENT_NO_PROXY_RUN_OUT" = 'ambient|unset' ] || fail "hat run must leave the ambient no-proxy value untouched when no shared no-proxy list is configured: $AMBIENT_NO_PROXY_RUN_OUT"
+
 echo 'All hat tests passed.'

@@ -70,6 +70,9 @@ hat role share-auth architect
 # Optionally set a shared HTTP(S) proxy for every role's `hat run`.
 hat proxy set http://localhost:8008
 
+# Optionally exempt hosts from that proxy.
+hat no-proxy set localhost,.internal
+
 # Run a registered CLI in the current project directory.
 hat run architect -- claude
 hat run architect -- codex
@@ -80,6 +83,7 @@ hat run architect -- copilot
 hat role list
 hat role doctor architect
 hat proxy show
+hat no-proxy show
 ```
 
 ### Proxy
@@ -92,6 +96,16 @@ hat proxy show
 hat proxy unset
 ```
 
+### No-proxy
+
+`hat run` exports the configured no-proxy list the same way — as `NO_PROXY` and `no_proxy` — for the duration of the command it launches. It is a single, shared list of hosts to bypass the proxy for, independent of whether a proxy is even set; when unset, `hat run` leaves the ambient shell's `NO_PROXY`/`no_proxy` untouched. Values are a comma-separated list of hosts, with no spaces; entries may use a leading `.` or `*.` for domain suffixes, `host:port`, or a bare `*` to bypass the proxy for everything.
+
+```sh
+hat no-proxy set <hosts>    # e.g. localhost,.internal,10.0.0.1
+hat no-proxy show
+hat no-proxy unset
+```
+
 ## Layout
 
 `HAT_HOME` is the only location setting. It defaults to `~/.hat`.
@@ -99,6 +113,7 @@ hat proxy unset
 ```text
 ~/.hat/
 ├── proxy
+├── no_proxy
 └── architect/
     ├── .hat-role
     ├── skills/
@@ -112,7 +127,7 @@ hat proxy unset
         └── copilot/skills -> ../../skills
 ```
 
-Skill names use lower-case slugs (`tdd`, `report-review`). `hat` does not offer deletion commands. To stop a role from using a skill, manually remove that role's local skill directory. Skills are copied independently into each role; changing one role's copy does not change another's. `~/.hat/proxy` only exists once `hat proxy set` has been run; it applies to every role.
+Skill names use lower-case slugs (`tdd`, `report-review`). `hat` does not offer deletion commands. To stop a role from using a skill, manually remove that role's local skill directory. Skills are copied independently into each role; changing one role's copy does not change another's. `~/.hat/proxy` only exists once `hat proxy set` has been run, and `~/.hat/no_proxy` only exists once `hat no-proxy set` has been run; each applies to every role.
 
 ## Adapters
 

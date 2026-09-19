@@ -70,6 +70,9 @@ hat role share-auth architect
 # 可选：为所有角色的 `hat run` 配置一个共享的 HTTP(S) 代理。
 hat proxy set http://localhost:8008
 
+# 可选：为该代理配置豁免主机。
+hat no-proxy set localhost,.internal
+
 # 在当前项目目录中运行已注册的 CLI。
 hat run architect -- claude
 hat run architect -- codex
@@ -80,6 +83,7 @@ hat run architect -- copilot
 hat role list
 hat role doctor architect
 hat proxy show
+hat no-proxy show
 ```
 
 ### 代理
@@ -92,6 +96,16 @@ hat proxy show
 hat proxy unset
 ```
 
+### 不代理（NO_PROXY）
+
+`hat run` 会以同样的方式导出已配置的豁免列表——设置 `NO_PROXY` 及其小写形式 `no_proxy`。它是所有角色共享的单一豁免列表，与是否配置了代理无关；未配置时，`hat run` 完全不改动当前 shell 已有的 `NO_PROXY`/`no_proxy` 环境变量。取值是以逗号分隔、不含空格的主机列表；单个条目可以使用前缀 `.` 或 `*.` 表示域名后缀、`主机:端口`，也可以用单独的 `*` 表示对所有主机都不走代理。
+
+```sh
+hat no-proxy set <hosts>    # 例如 localhost,.internal,10.0.0.1
+hat no-proxy show
+hat no-proxy unset
+```
+
 ## 目录结构
 
 `HAT_HOME` 是唯一的位置配置项，默认值为 `~/.hat`。
@@ -99,6 +113,7 @@ hat proxy unset
 ```text
 ~/.hat/
 ├── proxy
+├── no_proxy
 └── architect/
     ├── .hat-role
     ├── skills/
@@ -112,7 +127,7 @@ hat proxy unset
         └── copilot/skills -> ../../skills
 ```
 
-技能名称使用小写 slug（如 `tdd`、`report-review`）。`hat` 不提供删除命令。若要让角色停止使用某项技能，请仅手动移除该角色的本地技能目录。技能会独立复制到每个角色中；修改一个角色的副本不会影响其他角色。只有执行过 `hat proxy set` 之后，`~/.hat/proxy` 文件才会存在；它对所有角色生效。
+技能名称使用小写 slug（如 `tdd`、`report-review`）。`hat` 不提供删除命令。若要让角色停止使用某项技能，请仅手动移除该角色的本地技能目录。技能会独立复制到每个角色中；修改一个角色的副本不会影响其他角色。只有执行过 `hat proxy set` 之后，`~/.hat/proxy` 文件才会存在；只有执行过 `hat no-proxy set` 之后，`~/.hat/no_proxy` 文件才会存在；两者都对所有角色生效。
 
 ## 适配器
 
