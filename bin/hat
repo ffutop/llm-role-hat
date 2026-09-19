@@ -17,6 +17,9 @@ Commands:
   hat role list                                  List roles.
   hat role doctor [role]                         Read-only health check.
   hat run <role> -- <cli> [args...]              Run a registered CLI for a role.
+  hat proxy set <url>                            Set the shared HTTP(S) proxy.
+  hat proxy unset                                Remove the shared proxy.
+  hat proxy show                                 Print the configured proxy.
   hat shortcut install <bash|zsh> [rc-file]       Install @role CLI shortcuts.
   hat completion <bash|zsh>                      Print shell completion.
   hat completion install <bash|zsh> [rc-file]    Install shell completion.
@@ -35,7 +38,11 @@ valid_role() { valid_segment "$1"; }
 
 valid_skill_name() { valid_segment "$1"; }
 
+valid_proxy_url() { [[ "$1" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$ ]]; }
+
 role_dir() { printf '%s/%s\n' "$HAT_HOME" "$1"; }
+
+proxy_file() { printf '%s/proxy\n' "$HAT_HOME"; }
 
 role_exists() { [ -f "$(role_dir "$1")/.hat-role" ]; }
 
@@ -49,6 +56,18 @@ with_role_lock() {
   local role="$1" lock="$(role_dir "$role")/.hat-lock"
   shift
   mkdir "$lock" 2>/dev/null || die "role '$role' is being changed by another hat process"
+  ( "$@" ) || {
+    rmdir "$lock"
+    return 1
+  }
+  rmdir "$lock"
+}
+
+with_global_lock() {
+  local lock
+  mkdir -p "$HAT_HOME"
+  lock="$HAT_HOME/.hat-lock"
+  mkdir "$lock" 2>/dev/null || die 'hat is being changed by another hat process'
   ( "$@" ) || {
     rmdir "$lock"
     return 1
@@ -171,6 +190,60 @@ cmd_role_share_auth() {
   with_role_lock "$role" _role_share_auth "$role" "$adapter"
 }
 
+_proxy_set() {
+  local url="$1" file tmp
+  file="$(proxy_file)"
+  tmp="$file.tmp.$$"
+  printf '%s\n' "$url" > "$tmp"
+  mv "$tmp" "$file"
+  note "proxy set to $url"
+}
+
+cmd_proxy_set() {
+  [ "$#" -eq 1 ] || die 'usage: hat proxy set <url>'
+  valid_proxy_url "$1" || die "invalid proxy url '$1' (expected http:// or https://host[:port][/path])"
+  with_global_lock _proxy_set "$1"
+}
+
+_proxy_unset() {
+  local file
+  file="$(proxy_file)"
+  if [ -e "$file" ]; then
+    rm -f "$file"
+    note 'proxy removed'
+  else
+    note 'no proxy configured'
+  fi
+}
+
+cmd_proxy_unset() {
+  [ "$#" -eq 0 ] || die 'usage: hat proxy unset'
+  with_global_lock _proxy_unset
+}
+
+cmd_proxy_show() {
+  [ "$#" -eq 0 ] || die 'usage: hat proxy show'
+  local file
+  file="$(proxy_file)"
+  if [ -f "$file" ]; then
+    cat "$file"
+  else
+    note 'no proxy configured'
+  fi
+}
+
+cmd_proxy() {
+  [ "$#" -ge 1 ] || die 'usage: hat proxy <set|unset|show> [url]'
+  local sub="$1"
+  shift
+  case "$sub" in
+    set) cmd_proxy_set "$@" ;;
+    unset) cmd_proxy_unset "$@" ;;
+    show) cmd_proxy_show "$@" ;;
+    *) die 'usage: hat proxy <set|unset|show> [url]' ;;
+  esac
+}
+
 cmd_role_list() {
   [ "$#" -eq 0 ] || die 'usage: hat role list'
   [ -d "$HAT_HOME" ] || return 0
@@ -211,6 +284,14 @@ cmd_run() {
     qwen) export QWEN_HOME ;;
     copilot) export COPILOT_HOME ;;
   esac
+  local proxy_path="$(proxy_file)" proxy_url
+  if [ -f "$proxy_path" ]; then
+    proxy_url="$(<"$proxy_path")"
+    if [ -n "$proxy_url" ]; then
+      export HTTP_PROXY="$proxy_url" HTTPS_PROXY="$proxy_url"
+      export http_proxy="$proxy_url" https_proxy="$proxy_url"
+    fi
+  fi
   exec "$@"
 }
 
@@ -302,7 +383,7 @@ cmd_completion() {
 _hat_completion() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W 'role run shortcut completion help' -- "$cur") )
+    COMPREPLY=( $(compgen -W 'role run proxy shortcut completion help' -- "$cur") )
     return
   fi
   case "${COMP_WORDS[1]}" in
@@ -319,6 +400,9 @@ _hat_completion() {
       ;;
     run)
       [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=( $(compgen -W "$(hat role list 2>/dev/null)" -- "$cur") )
+      ;;
+    proxy)
+      [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=( $(compgen -W 'set unset show' -- "$cur") )
       ;;
     shortcut)
       if [ "$COMP_CWORD" -eq 2 ]; then
@@ -348,7 +432,7 @@ _hat() {
   case $CURRENT in
     2)
       _values 'command' \
-        'role[manage roles]' 'run[run a CLI]' \
+        'role[manage roles]' 'run[run a CLI]' 'proxy[configure the shared proxy]' \
         'shortcut[install CLI shortcuts]' 'completion[print or install completion]' \
         'help[show usage]'
       ;;
@@ -356,6 +440,7 @@ _hat() {
       case ${words[2]} in
         role) _values 'subcommand' create add-skill share-auth list doctor ;;
         run) _values 'role' $roles ;;
+        proxy) _values 'subcommand' set unset show ;;
         shortcut) _values 'subcommand' install ;;
         completion) _values 'target' bash zsh install ;;
       esac
@@ -430,6 +515,7 @@ case "$1" in
       *) die 'usage: hat role <create|add-skill|share-auth|list|doctor> ...' ;;
     esac ;;
   run) shift; cmd_run "$@" ;;
+  proxy) shift; cmd_proxy "$@" ;;
   shortcut)
     shift
     case "${1:-}" in

@@ -173,4 +173,30 @@ if command -v zsh >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
   [ "$ZSH_REGISTERED" = '1' ] || fail "sourcing the installed zsh rc block must register hat completion (got '$ZSH_REGISTERED'): $(<"$TMP_DIR/zsh-completion.err")"
 fi
 
+echo '11. a single shared proxy is set, injected into hat run for every role, and cleanly unset'
+[ "$("$HAT" proxy show)" = 'no proxy configured' ] || fail 'a fresh hat home must report no proxy configured'
+if "$HAT" proxy set not-a-url >"$TMP_DIR/proxy-invalid.out" 2>&1; then
+  fail 'an invalid proxy url must be rejected'
+fi
+"$HAT" proxy set http://localhost:8008
+assert_file "$HAT_HOME/proxy"
+[ "$(<"$HAT_HOME/proxy")" = 'http://localhost:8008' ] || fail 'proxy file must contain the configured url'
+[ "$("$HAT" proxy show)" = 'http://localhost:8008' ] || fail 'proxy show must print the configured url'
+"$HAT" proxy set http://localhost:9009
+[ "$(<"$HAT_HOME/proxy")" = 'http://localhost:9009' ] || fail 'proxy set must overwrite an existing proxy'
+
+mkdir -p "$TMP_DIR/proxy-bin"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s|%s|%s|%s\n" "${HTTP_PROXY:-unset}" "${HTTPS_PROXY:-unset}" "${http_proxy:-unset}" "${https_proxy:-unset}"' > "$TMP_DIR/proxy-bin/codex"
+chmod +x "$TMP_DIR/proxy-bin/codex"
+PROXY_RUN_OUT="$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy PATH="$TMP_DIR/proxy-bin:$PATH" "$HAT" run architect -- codex)"
+[ "$PROXY_RUN_OUT" = 'http://localhost:9009|http://localhost:9009|http://localhost:9009|http://localhost:9009' ] || fail "hat run must export the shared proxy in upper and lower case: $PROXY_RUN_OUT"
+PROXY_RUN_OUT_2="$(env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy PATH="$TMP_DIR/proxy-bin:$PATH" "$HAT" run finance -- codex)"
+[ "$PROXY_RUN_OUT_2" = 'http://localhost:9009|http://localhost:9009|http://localhost:9009|http://localhost:9009' ] || fail "the shared proxy must apply the same way to every role: $PROXY_RUN_OUT_2"
+
+"$HAT" proxy unset
+[ ! -e "$HAT_HOME/proxy" ] || fail 'proxy unset must remove the proxy file'
+[ "$("$HAT" proxy show)" = 'no proxy configured' ] || fail 'proxy show must report no proxy after unset'
+AMBIENT_RUN_OUT="$(env -u http_proxy -u https_proxy HTTP_PROXY='http://ambient:1' HTTPS_PROXY='http://ambient:1' PATH="$TMP_DIR/proxy-bin:$PATH" "$HAT" run architect -- codex)"
+[ "$AMBIENT_RUN_OUT" = 'http://ambient:1|http://ambient:1|unset|unset' ] || fail "hat run must leave the ambient proxy untouched when no shared proxy is configured: $AMBIENT_RUN_OUT"
+
 echo 'All hat tests passed.'

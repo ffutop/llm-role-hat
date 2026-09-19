@@ -67,6 +67,9 @@ hat role add-skill architect ~/work/skills/tdd tdd
 # 显式将角色凭据文件链接到默认 CLI 主目录。
 hat role share-auth architect
 
+# 可选：为所有角色的 `hat run` 配置一个共享的 HTTP(S) 代理。
+hat proxy set http://localhost:8008
+
 # 在当前项目目录中运行已注册的 CLI。
 hat run architect -- claude
 hat run architect -- codex
@@ -76,6 +79,17 @@ hat run architect -- copilot
 # 只查看状态，不做任何修改。
 hat role list
 hat role doctor architect
+hat proxy show
+```
+
+### 代理
+
+`hat run` 会在启动 CLI 的这一次调用期间，导出已配置的代理——同时设置 `HTTP_PROXY`、`HTTPS_PROXY` 及其小写形式（不同 CLI 读取的大小写不一致），调用结束后不需要做任何恢复（每次 `hat run` 都是全新进程）。代理是所有角色共享的单一配置，而非按角色区分的状态；未配置时，`hat run` 完全不改动当前 shell 已有的代理环境变量。
+
+```sh
+hat proxy set <url>    # 例如 http://localhost:8008
+hat proxy show
+hat proxy unset
 ```
 
 ## 目录结构
@@ -84,6 +98,7 @@ hat role doctor architect
 
 ```text
 ~/.hat/
+├── proxy
 └── architect/
     ├── .hat-role
     ├── skills/
@@ -97,7 +112,7 @@ hat role doctor architect
         └── copilot/skills -> ../../skills
 ```
 
-技能名称使用小写 slug（如 `tdd`、`report-review`）。`hat` 不提供删除命令。若要让角色停止使用某项技能，请仅手动移除该角色的本地技能目录。技能会独立复制到每个角色中；修改一个角色的副本不会影响其他角色。
+技能名称使用小写 slug（如 `tdd`、`report-review`）。`hat` 不提供删除命令。若要让角色停止使用某项技能，请仅手动移除该角色的本地技能目录。技能会独立复制到每个角色中；修改一个角色的副本不会影响其他角色。只有执行过 `hat proxy set` 之后，`~/.hat/proxy` 文件才会存在；它对所有角色生效。
 
 ## 适配器
 

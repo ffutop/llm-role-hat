@@ -67,6 +67,9 @@ hat role add-skill architect ~/work/skills/tdd tdd
 # Explicitly link role credential files to the default CLI homes.
 hat role share-auth architect
 
+# Optionally set a shared HTTP(S) proxy for every role's `hat run`.
+hat proxy set http://localhost:8008
+
 # Run a registered CLI in the current project directory.
 hat run architect -- claude
 hat run architect -- codex
@@ -76,6 +79,17 @@ hat run architect -- copilot
 # Inspect state without changing it.
 hat role list
 hat role doctor architect
+hat proxy show
+```
+
+### Proxy
+
+`hat run` exports the configured proxy — as `HTTP_PROXY`, `HTTPS_PROXY`, and their lowercase forms, since CLIs disagree on which case they read — for the duration of the command it launches, then restores nothing (each `hat run` is a fresh process). The proxy is a single, shared setting for every role, not per-role state; when unset, `hat run` leaves the ambient shell's proxy variables untouched.
+
+```sh
+hat proxy set <url>    # e.g. http://localhost:8008
+hat proxy show
+hat proxy unset
 ```
 
 ## Layout
@@ -84,6 +98,7 @@ hat role doctor architect
 
 ```text
 ~/.hat/
+├── proxy
 └── architect/
     ├── .hat-role
     ├── skills/
@@ -97,7 +112,7 @@ hat role doctor architect
         └── copilot/skills -> ../../skills
 ```
 
-Skill names use lower-case slugs (`tdd`, `report-review`). `hat` does not offer deletion commands. To stop a role from using a skill, manually remove that role's local skill directory. Skills are copied independently into each role; changing one role's copy does not change another's.
+Skill names use lower-case slugs (`tdd`, `report-review`). `hat` does not offer deletion commands. To stop a role from using a skill, manually remove that role's local skill directory. Skills are copied independently into each role; changing one role's copy does not change another's. `~/.hat/proxy` only exists once `hat proxy set` has been run; it applies to every role.
 
 ## Adapters
 
