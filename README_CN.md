@@ -44,12 +44,14 @@ curl -fsSL https://hat.ffutop.com/install.sh | bash
 PREFIX="$HOME/.local" HAT_DOWNLOAD_URL="https://example.com/hat/bin/hat" ./install.sh
 ```
 
-请确认所选 `bin` 目录已在 `PATH` 中，然后可选地启用自动补全：
+请确认所选 `bin` 目录已在 `PATH` 中，然后在当前 shell 中启用自动补全：
 
 ```sh
 source <(hat completion bash)
 # 或：source <(hat completion zsh)
 ```
+
+如需让每个新开的 shell 都自动拥有补全，请改为写入 rc 文件：执行 `hat completion install bash` 或 `hat completion install zsh`，再重新加载对应 rc 文件（或新开一个终端）。该命令会追加一段带标记、幂等的代码块；重复执行不会产生重复内容。需要时，可在命令末尾传入 rc 文件的显式路径。
 
 如需启用 `claude @角色` 和 `codex @角色` 快捷调用，请执行 `hat shortcut install bash` 或 `hat shortcut install zsh`，再重新加载对应 rc 文件。例如，`codex @architect` 会使用 `architect` 角色；`HAT_ROLE=architect codex` 可为单次调用指定角色。需要时，可在命令末尾传入 rc 文件的显式路径。
 

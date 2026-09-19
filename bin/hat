@@ -19,6 +19,7 @@ Commands:
   hat run <role> -- <cli> [args...]              Run a registered CLI for a role.
   hat shortcut install <bash|zsh> [rc-file]       Install @role CLI shortcuts.
   hat completion <bash|zsh>                      Print shell completion.
+  hat completion install <bash|zsh> [rc-file]    Install shell completion.
 
 Registered CLIs: claude, codex, qwen, copilot
 Environment: HAT_HOME (default: ~/.hat)
@@ -299,12 +300,41 @@ cmd_completion() {
     bash)
       cat <<'EOF'
 _hat_completion() {
-  local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}"
-  if [ "$prev" = "hat" ]; then COMPREPLY=( $(compgen -W 'role run shortcut completion' -- "$cur") ); return; fi
-  if [ "${COMP_WORDS[1]}" = role ]; then
-    if [ "$prev" = role ]; then COMPREPLY=( $(compgen -W 'create add-skill share-auth list doctor' -- "$cur") ); return; fi
-    case "${COMP_WORDS[2]}" in add-skill|share-auth|doctor) COMPREPLY=( $(compgen -W "$(hat role list)" -- "$cur") ) ;; esac
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W 'role run shortcut completion help' -- "$cur") )
+    return
   fi
+  case "${COMP_WORDS[1]}" in
+    role)
+      if [ "$COMP_CWORD" -eq 2 ]; then
+        COMPREPLY=( $(compgen -W 'create add-skill share-auth list doctor' -- "$cur") )
+        return
+      fi
+      case "${COMP_WORDS[2]}" in
+        add-skill|share-auth|doctor)
+          [ "$COMP_CWORD" -eq 3 ] && COMPREPLY=( $(compgen -W "$(hat role list 2>/dev/null)" -- "$cur") )
+          ;;
+      esac
+      ;;
+    run)
+      [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=( $(compgen -W "$(hat role list 2>/dev/null)" -- "$cur") )
+      ;;
+    shortcut)
+      if [ "$COMP_CWORD" -eq 2 ]; then
+        COMPREPLY=( $(compgen -W 'install' -- "$cur") )
+        return
+      fi
+      [ "$COMP_CWORD" -eq 3 ] && COMPREPLY=( $(compgen -W 'bash zsh' -- "$cur") )
+      ;;
+    completion)
+      if [ "$COMP_CWORD" -eq 2 ]; then
+        COMPREPLY=( $(compgen -W 'bash zsh install' -- "$cur") )
+        return
+      fi
+      [ "${COMP_WORDS[2]}" = install ] && [ "$COMP_CWORD" -eq 3 ] && COMPREPLY=( $(compgen -W 'bash zsh' -- "$cur") )
+      ;;
+  esac
 }
 complete -F _hat_completion hat
 EOF
@@ -315,17 +345,76 @@ EOF
 _hat() {
   local -a roles
   roles=( ${(f)"$(hat role list 2>/dev/null)"} )
-  _arguments '1: :->command' '*: :->args'
-  case $state in
-    command) _values 'command' 'role[manage roles]' 'run[run a CLI]' 'shortcut[install CLI shortcuts]' 'completion[print completion]' ;;
-    args) _arguments '1:role:->role' '2: :->subcommand' ;;
+  case $CURRENT in
+    2)
+      _values 'command' \
+        'role[manage roles]' 'run[run a CLI]' \
+        'shortcut[install CLI shortcuts]' 'completion[print or install completion]' \
+        'help[show usage]'
+      ;;
+    3)
+      case ${words[2]} in
+        role) _values 'subcommand' create add-skill share-auth list doctor ;;
+        run) _values 'role' $roles ;;
+        shortcut) _values 'subcommand' install ;;
+        completion) _values 'target' bash zsh install ;;
+      esac
+      ;;
+    4)
+      case "${words[2]}/${words[3]}" in
+        role/add-skill|role/share-auth|role/doctor) _values 'role' $roles ;;
+        shortcut/install|completion/install) _values 'shell' bash zsh ;;
+      esac
+      ;;
   esac
 }
-_hat "$@"
+(( $+functions[compdef] )) && compdef _hat hat
 EOF
       ;;
     *) die 'completion shell must be bash or zsh' ;;
   esac
+}
+
+cmd_completion_install() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die 'usage: hat completion install <bash|zsh> [rc-file]'
+  local shell="$1" rc_file begin='# >>> hat completion >>>' end='# <<< hat completion <<<'
+  case "$shell" in
+    bash) rc_file="${2:-$HOME/.bashrc}" ;;
+    zsh) rc_file="${2:-$HOME/.zshrc}" ;;
+    *) die 'completion shell must be bash or zsh' ;;
+  esac
+  [ -n "$rc_file" ] || die 'rc-file must not be empty'
+  mkdir -p "$(dirname "$rc_file")"
+  touch "$rc_file"
+  if grep -Fqx "$begin" "$rc_file" || grep -Fqx "$end" "$rc_file"; then
+    grep -Fqx "$begin" "$rc_file" && grep -Fqx "$end" "$rc_file" && {
+      note "hat completion is already installed in $rc_file"
+      return 0
+    }
+    die "rc file contains an incomplete hat completion block: $rc_file"
+  fi
+  if [ "$shell" = bash ]; then
+    cat >> "$rc_file" <<EOF
+
+$begin
+if command -v hat >/dev/null 2>&1; then
+  eval "\$(hat completion bash)"
+fi
+$end
+EOF
+  else
+    cat >> "$rc_file" <<EOF
+
+$begin
+if command -v hat >/dev/null 2>&1; then
+  autoload -Uz compinit
+  compinit -u -C
+  eval "\$(hat completion zsh)"
+fi
+$end
+EOF
+  fi
+  note "installed hat completion in $rc_file"
 }
 
 [ "$#" -gt 0 ] || { usage; exit 1; }
@@ -347,7 +436,12 @@ case "$1" in
       install) shift; cmd_shortcut_install "$@" ;;
       *) die 'usage: hat shortcut install <bash|zsh> [rc-file]' ;;
     esac ;;
-  completion) shift; cmd_completion "$@" ;;
+  completion)
+    shift
+    case "${1:-}" in
+      install) shift; cmd_completion_install "$@" ;;
+      *) cmd_completion "$@" ;;
+    esac ;;
   help|-h|--help) usage ;;
   *) die "unknown command '$1'" ;;
 esac

@@ -44,12 +44,14 @@ For a local checkout or a pinned/mirrored release, point `HAT_DOWNLOAD_URL` to t
 PREFIX="$HOME/.local" HAT_DOWNLOAD_URL="https://example.com/hat/bin/hat" ./install.sh
 ```
 
-Ensure the chosen `bin` directory is on `PATH`, then optionally enable completion:
+Ensure the chosen `bin` directory is on `PATH`, then enable completion for the current shell:
 
 ```sh
 source <(hat completion bash)
 # or: source <(hat completion zsh)
 ```
+
+To keep completion available in every new shell, install it into the rc file instead: run `hat completion install bash` or `hat completion install zsh`, then reload the corresponding rc file (or open a new one). It appends an idempotent, marker-delimited block; running it again is a no-op. Pass an explicit rc-file path as the final argument when needed.
 
 To enable `claude @role` and `codex @role` shortcuts, run `hat shortcut install bash` or `hat shortcut install zsh`, then reload the corresponding rc file. For example, `codex @architect` uses the `architect` role; `HAT_ROLE=architect codex` sets the role for one invocation. Pass an explicit rc-file path as the final argument when needed.
 

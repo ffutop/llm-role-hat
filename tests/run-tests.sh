@@ -112,4 +112,65 @@ PREFIX="$INSTALL_PREFIX" HAT_DOWNLOAD_URL="file://$ROOT_DIR/bin/hat" "$ROOT_DIR/
 assert_file "$INSTALL_PREFIX/bin/hat"
 assert_contains "$("$INSTALL_PREFIX/bin/hat" help)" 'hat shortcut install <bash|zsh> [rc-file]'
 
+echo '9. bash completion suggests commands, subcommands, and live role names'
+"$HAT" completion bash > "$TMP_DIR/hat-completion.bash"
+assert_contains "$(<"$TMP_DIR/hat-completion.bash")" '_hat_completion'
+TOP_LEVEL="$(PATH="$ROOT_DIR/bin:$PATH" bash -c '
+  source "$1"
+  COMP_WORDS=(hat "")
+  COMP_CWORD=1
+  _hat_completion
+  printf "%s\n" "${COMPREPLY[@]}"
+' -- "$TMP_DIR/hat-completion.bash")"
+assert_contains "$TOP_LEVEL" 'completion'
+assert_contains "$TOP_LEVEL" 'shortcut'
+ROLE_COMPLETIONS="$(PATH="$ROOT_DIR/bin:$PATH" bash -c '
+  source "$1"
+  COMP_WORDS=(hat role add-skill "")
+  COMP_CWORD=3
+  _hat_completion
+  printf "%s\n" "${COMPREPLY[@]}"
+' -- "$TMP_DIR/hat-completion.bash")"
+assert_contains "$ROLE_COMPLETIONS" 'architect'
+assert_contains "$ROLE_COMPLETIONS" 'reviewer'
+COMPLETION_SUBCOMMANDS="$(PATH="$ROOT_DIR/bin:$PATH" bash -c '
+  source "$1"
+  COMP_WORDS=(hat completion "")
+  COMP_CWORD=2
+  _hat_completion
+  printf "%s\n" "${COMPREPLY[@]}"
+' -- "$TMP_DIR/hat-completion.bash")"
+assert_contains "$COMPLETION_SUBCOMMANDS" 'install'
+
+echo '10. shell completion installation is append-only, idempotent, and wires real completion'
+COMP_RC_BASH="$TMP_DIR/bashrc-completion"
+printf '%s\n' '# existing user setting' > "$COMP_RC_BASH"
+"$HAT" completion install bash "$COMP_RC_BASH"
+assert_contains "$(<"$COMP_RC_BASH")" '# existing user setting'
+assert_contains "$(<"$COMP_RC_BASH")" '# >>> hat completion >>>'
+assert_contains "$(<"$COMP_RC_BASH")" 'hat completion bash'
+COMPLETION_BLOCKS="$(grep -c '^# >>> hat completion >>>$' "$COMP_RC_BASH")"
+"$HAT" completion install bash "$COMP_RC_BASH"
+[ "$(grep -c '^# >>> hat completion >>>$' "$COMP_RC_BASH")" = "$COMPLETION_BLOCKS" ] || fail 'completion installation must not duplicate its block'
+printf '%s\n' '# >>> hat completion >>>' > "$TMP_DIR/incomplete-completion-rc"
+if "$HAT" completion install bash "$TMP_DIR/incomplete-completion-rc" >"$TMP_DIR/incomplete-completion.out" 2>&1; then
+  fail 'incomplete completion block must fail'
+fi
+RC_FUNCTION_CHECK="$(PATH="$ROOT_DIR/bin:$PATH" bash -c 'source "$1"; type -t _hat_completion' -- "$COMP_RC_BASH")"
+[ "$RC_FUNCTION_CHECK" = 'function' ] || fail 'sourcing the installed bash rc block must register _hat_completion'
+
+COMP_RC_ZSH="$TMP_DIR/zshrc-completion"
+printf '%s\n' '# existing zsh setting' > "$COMP_RC_ZSH"
+"$HAT" completion install zsh "$COMP_RC_ZSH"
+assert_contains "$(<"$COMP_RC_ZSH")" '# existing zsh setting'
+assert_contains "$(<"$COMP_RC_ZSH")" '# >>> hat completion >>>'
+assert_contains "$(<"$COMP_RC_ZSH")" 'compinit'
+assert_contains "$(<"$COMP_RC_ZSH")" 'hat completion zsh'
+"$HAT" completion install zsh "$COMP_RC_ZSH"
+[ "$(grep -c '^# >>> hat completion >>>$' "$COMP_RC_ZSH")" = 1 ] || fail 'zsh completion installation must not duplicate its block'
+if command -v zsh >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  ZSH_REGISTERED="$(timeout 10 env PATH="$ROOT_DIR/bin:$PATH" HAT_HOME="$HAT_HOME" zsh -f -c 'source "$1"; print -r -- "$+_comps[hat]"' -- "$COMP_RC_ZSH" 2>"$TMP_DIR/zsh-completion.err" || true)"
+  [ "$ZSH_REGISTERED" = '1' ] || fail "sourcing the installed zsh rc block must register hat completion (got '$ZSH_REGISTERED'): $(<"$TMP_DIR/zsh-completion.err")"
+fi
+
 echo 'All hat tests passed.'
